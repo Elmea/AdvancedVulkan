@@ -1,0 +1,6 @@
+.vs/
+.idea/
+x64/*
+libs/glfw-3.3/docs
+libs/glm/doc
+libs/stb/docs
