@@ -1,6 +1,9 @@
 .vs/
 .idea/
-x64/*
+x64
+vulkan_avance/x64
 libs/glfw-3.3/docs
 libs/glm/doc
 libs/stb/docs
+
+
