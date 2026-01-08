@@ -11,6 +11,8 @@
 
 #define APP_NAME "Vulkan_Avance"
 
+#define INSTANCE_COUNT 200
+
 //
 enum MatrixBufferUsageType 
 {
@@ -700,7 +702,7 @@ bool VulkanGraphicsApplication::Prepare()
 	}
 
 	// SSBO
-	scene.instanceCount = 500;
+	scene.instanceCount = INSTANCE_COUNT;
 	scene.cpuInstances.resize(scene.instanceCount);
 
 	for (uint32_t i = 0; i < scene.instanceCount; i++)
