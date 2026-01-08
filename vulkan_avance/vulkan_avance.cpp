@@ -44,6 +44,11 @@ enum DescriptorSetType
 static constexpr uint32_t DescriptorSetsDuplicatedCount = 2;
 static constexpr uint32_t DescriptorSetsSharedCount = 1;
 
+struct InstanceData
+{
+	glm::mat4 world;
+};
+
 struct SceneMatrices
 {
 	// Partie CPU --- (pas forcement utile de dupliquer, mais plus simple)
@@ -83,6 +88,10 @@ struct Scene
 	Frame frameData[VulkanRenderContext::PENDING_FRAMES];
 	// ...sauf ce qui est partage
 	VkDescriptorSet sharedDescriptorSet;
+
+	std::vector<InstanceData> cpuInstances;
+	Buffer instanceSSBO[VulkanRenderContext::PENDING_FRAMES];
+	uint32_t instanceCount = 0;
 };
 
 // juste parceque j'ai la flemme de faire des headers 
@@ -284,11 +293,12 @@ bool VulkanGraphicsApplication::Prepare()
 	//
 	// Descriptor Pool
 	//
-	std::array<VkDescriptorPoolSize, 2> poolSizes;
+	std::array<VkDescriptorPoolSize, 3> poolSizes;
 	// 2 pools de descripteurs : [0] pour les frames "in-flight" (ici je duplique simplement), [1] pour les textures (shared) 
 	poolSizes[0] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MATRIXBUFFER_COUNT * rendercontext.PENDING_FRAMES };
 	poolSizes[1] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6 };
-	
+	poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MATRIXBUFFER_COUNT * rendercontext.PENDING_FRAMES };
+
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
 	descriptorPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	//descriptorPoolInfo.flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
@@ -311,14 +321,16 @@ bool VulkanGraphicsApplication::Prepare()
 
 	// set 0
 	sceneSetBindingsCount[sceneSetCount] = 0;
-	sceneSetBindings[0] = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr };
+	sceneSetBindings[0] = { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr};
 	sceneSetBindingsCount[sceneSetCount]++;
 	++sceneSetCount;
+
 	// set 1
 	sceneSetBindingsCount[sceneSetCount] = 0;
 	sceneSetBindings[1] = { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr };
 	sceneSetBindingsCount[sceneSetCount]++;
 	++sceneSetCount;
+
 	uint32_t frameSetCount = sceneSetCount;
 	// set 2
 	sceneSetBindingsCount[sceneSetCount] = 0;
@@ -327,6 +339,7 @@ bool VulkanGraphicsApplication::Prepare()
 		sceneSetBindingsCount[sceneSetCount]++;
 	}
 	++sceneSetCount;
+
 	uint32_t commonSets = sceneSetCount - frameSetCount;
 
 	//sceneSetInfo.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
@@ -374,7 +387,7 @@ bool VulkanGraphicsApplication::Prepare()
 	// Pipeline
 	//
 
-	auto vertShaderCode = readFile("shaders/mesh.vert.spv");
+	auto vertShaderCode = readFile("shaders/Instancing_Test.vert.spv");
 	auto fragShaderCode = readFile("shaders/mesh.frag.spv");
 
 	VkShaderModule vertShaderModule = context.createShaderModule(vertShaderCode);
@@ -648,7 +661,7 @@ bool VulkanGraphicsApplication::Prepare()
 
 		VkWriteDescriptorSet writeDescriptorSet[DescriptorSetsDuplicatedCount] = {};
 		// Set #0 et #1
-		for (int i = 0; i < MATRIXBUFFER_COUNT; i++)
+		for (int i = 1; i < MATRIXBUFFER_COUNT; i++)
 		{
 			writeDescriptorSet[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			writeDescriptorSet[i].pImageInfo = nullptr;
@@ -684,6 +697,64 @@ bool VulkanGraphicsApplication::Prepare()
 			writeSharedDescriptorSet.dstSet = scene.sharedDescriptorSet;
 			vkUpdateDescriptorSets(context.device, 1, &writeSharedDescriptorSet, 0, nullptr);
 		}
+	}
+
+	// SSBO
+	scene.instanceCount = 500;
+	scene.cpuInstances.resize(scene.instanceCount);
+
+	for (uint32_t i = 0; i < scene.instanceCount; i++)
+	{
+		scene.cpuInstances[i].world =
+			glm::translate(glm::mat4(1.0f), glm::vec3(i * 2.5f, 0.f, 0.f));
+	}
+
+	VkBufferCreateInfo ssboInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	ssboInfo.size = sizeof(InstanceData) * scene.instanceCount;
+	ssboInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	ssboInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	for (uint32_t f = 0; f < rendercontext.PENDING_FRAMES; f++)
+	{
+		Buffer& ssbo = scene.instanceSSBO[f];
+
+		vkCreateBuffer(context.device, &ssboInfo, nullptr, &ssbo.buffer);
+
+		VkMemoryRequirements memReq;
+		vkGetBufferMemoryRequirements(context.device, ssbo.buffer, &memReq);
+
+		VkMemoryAllocateInfo alloc{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		alloc.allocationSize = memReq.size;
+		alloc.memoryTypeIndex = context.findMemoryType(
+			memReq.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+		);
+
+		vkAllocateMemory(context.device, &alloc, nullptr, &ssbo.memory);
+		vkBindBufferMemory(context.device, ssbo.buffer, ssbo.memory, 0);
+
+		vkMapMemory(context.device, ssbo.memory, 0, VK_WHOLE_SIZE, 0, &ssbo.data);
+	}
+
+	VkDescriptorBufferInfo instanceBufferInfo;
+
+	for (uint32_t f = 0; f < rendercontext.PENDING_FRAMES; f++)
+	{
+		instanceBufferInfo = {
+			scene.instanceSSBO[f].buffer,
+			0,
+			VK_WHOLE_SIZE
+		};
+
+		VkWriteDescriptorSet instanceWrite{};
+		instanceWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		instanceWrite.dstSet = scene.frameData[f].descriptorSet[0];
+		instanceWrite.dstBinding = 0;
+		instanceWrite.descriptorCount = 1;
+		instanceWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		instanceWrite.pBufferInfo = &instanceBufferInfo;
+
+		vkUpdateDescriptorSets(context.device, 1, &instanceWrite, 0, nullptr);
 	}
 
 	return true;
@@ -759,6 +830,8 @@ void VulkanGraphicsApplication::Terminate()
 	for (uint32_t i = 0; i < context.swapchainImageCount; i++) {
 		vkDestroySemaphore(context.device, context.presentSemaphores[i], nullptr);
 	}
+
+	vkDestroyBuffer(context.device, scene.instanceSSBO->buffer, nullptr);
 }
 
 //
@@ -942,14 +1015,17 @@ bool VulkanGraphicsApplication::Update()
 
 bool VulkanGraphicsApplication::Display()
 {
+	uint32_t f = rendercontext.currentFrame;
+
 	char* matrixData = (char*)&scene.matrices.world;
-	Buffer& ubo = scene.matrices.constantBuffers[MatrixBufferUsageType::INSTANCE];
+	//Buffer& ubo = scene.matrices.constantBuffers[MatrixBufferUsageType::INSTANCE];
 	VkMappedMemoryRange mappedRange = {};
 	mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-	mappedRange.memory = ubo.memory;
+	mappedRange.memory = scene.instanceSSBO->memory;
 	mappedRange.size = sizeof(glm::mat4);// VK_WHOLE_SIZE;
 	DEBUG_CHECK_VK(vkInvalidateMappedMemoryRanges(context.device, 1, &mappedRange));
-	memcpy(ubo.data, matrixData, sizeof(glm::mat4));
+		memcpy(scene.instanceSSBO[f].data, scene.cpuInstances.data(), sizeof(InstanceData) * scene.instanceCount);
+	//memcpy(ubo.data, matrixData, sizeof(glm::mat4));
 	DEBUG_CHECK_VK(vkFlushMappedMemoryRanges(context.device, 1, &mappedRange));
 
 	char* viewData = (char*)&scene.matrices.view;
@@ -1004,7 +1080,7 @@ bool VulkanGraphicsApplication::Display()
 		vkCmdBindIndexBuffer(commandBuffer, scene.meshes[0].staticBuffers[Mesh::BufferType::IBO].buffer, 0, VK_INDEX_TYPE_UINT32);
 		// opaque en premier
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, mainPipelineOpaque);
-		vkCmdDrawIndexed(commandBuffer, scene.meshes[0].indexCount, 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, scene.meshes[0].indexCount, scene.instanceCount, 0, 0, 0);
 
 		// env map (background) apres tout le reste
 		//vkCmdBindVertexBuffers(commandBuffer, 0, 0, nullptr, nullptr);
@@ -1018,7 +1094,6 @@ bool VulkanGraphicsApplication::Display()
 	vkEndCommandBuffer(commandBuffer);
 	return true;
 }
-
 
 void scrollCallback(GLFWwindow* window, double delta_x, double delta_y)
 {
@@ -1058,7 +1133,6 @@ void mouseCallback(GLFWwindow *window, int button, int action, int mods)
 	if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
 		moveEnabled = false;
 }
-
 
 int main(void)
 {
