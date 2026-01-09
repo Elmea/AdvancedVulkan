@@ -1,0 +1,149 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Boid {
+    mat4 world;
+};
+
+struct BoidVelocity {
+    vec4 velocity;
+};
+
+layout(set = 0, binding = 0) buffer InstanceBuffer {
+    Boid boids[];
+};
+
+layout(set = 0, binding = 1) buffer VelocityBuffer {
+    BoidVelocity velocities[];
+};
+
+layout(set = 0, binding = 2) uniform SimulationParams {
+    float deltaTime;
+    float separationDistance;
+    float alignmentDistance;
+    float cohesionDistance;
+    float separationWeight;
+    float alignmentWeight;
+    float cohesionWeight;
+    float maxSpeed;
+    float minSpeed;
+    uint boidCount;
+    vec3 boundaryMin;
+    vec3 boundaryMax;
+} params;
+
+vec3 getPosition(mat4 world) {
+    return world[3].xyz;
+}
+
+mat4 createWorldMatrix(vec3 position, vec3 direction) {
+    vec3 forward = normalize(direction);
+    
+    vec3 worldUp = vec3(0.0, 1.0, 0.0);
+    if (abs(dot(forward, worldUp)) > 0.99) {
+        worldUp = vec3(1.0, 0.0, 0.0);
+    }
+    
+    vec3 right = normalize(cross(worldUp, forward));
+    
+    vec3 up = cross(forward, right);
+    
+    return mat4(
+        vec4(right, 0.0),
+        vec4(up, 0.0),
+        vec4(forward, 0.0),
+        vec4(position, 1.0)
+    );
+}
+
+vec3 applyBoundaries(vec3 position) {
+    vec3 newPos = position;
+    
+    if (newPos.x < params.boundaryMin.x) newPos.x = params.boundaryMax.x;
+    if (newPos.x > params.boundaryMax.x) newPos.x = params.boundaryMin.x;
+    if (newPos.y < params.boundaryMin.y) newPos.y = params.boundaryMax.y;
+    if (newPos.y > params.boundaryMax.y) newPos.y = params.boundaryMin.y;
+    if (newPos.z < params.boundaryMin.z) newPos.z = params.boundaryMax.z;
+    if (newPos.z > params.boundaryMax.z) newPos.z = params.boundaryMin.z;
+    
+    return newPos;
+}
+
+void main() {
+    uint boidId = gl_GlobalInvocationID.x;
+    
+    if (boidId >= params.boidCount) {
+        return;
+    }
+    
+    vec3 myPosition = getPosition(boids[boidId].world);
+    vec3 myVelocity = velocities[boidId].velocity.xyz;
+    
+    vec3 separation = vec3(0.0);
+    vec3 alignment = vec3(0.0);
+    vec3 cohesion = vec3(0.0);
+    
+    int separationCount = 0;
+    int alignmentCount = 0;
+    int cohesionCount = 0;
+    
+    for (uint i = 0; i < params.boidCount; i++) {
+        if (i == boidId) continue;
+        
+        vec3 otherPosition = getPosition(boids[i].world);
+        vec3 otherVelocity = velocities[i].velocity.xyz;
+        
+        vec3 offset = otherPosition - myPosition;
+        float distance = length(offset);
+        
+        if (distance < params.separationDistance && distance > 0.001) {
+            separation -= offset / distance;
+            separationCount++;
+        }
+        
+        if (distance < params.alignmentDistance) {
+            alignment += otherVelocity;
+            alignmentCount++;
+        }
+        
+        if (distance < params.cohesionDistance) {
+            cohesion += otherPosition;
+            cohesionCount++;
+        }
+    }
+    
+    vec3 steer = vec3(0.0);
+    
+    if (separationCount > 0) {
+        separation /= float(separationCount);
+        steer += separation * params.separationWeight;
+    }
+    
+    if (alignmentCount > 0) {
+        alignment /= float(alignmentCount);
+        steer += (alignment - myVelocity) * params.alignmentWeight;
+    }
+    
+    if (cohesionCount > 0) {
+        cohesion /= float(cohesionCount);
+        vec3 desired = cohesion - myPosition;
+        steer += desired * params.cohesionWeight;
+    }
+    
+    vec3 newVelocity = myVelocity + steer * params.deltaTime;
+    
+    float speed = length(newVelocity);
+    if (speed > params.maxSpeed) {
+        newVelocity = (newVelocity / speed) * params.maxSpeed;
+    } else if (speed < params.minSpeed) {
+        newVelocity = (newVelocity / speed) * params.minSpeed;
+    }
+    
+    vec3 newPosition = myPosition + newVelocity * params.deltaTime;
+    
+    newPosition = applyBoundaries(newPosition);
+    
+    velocities[boidId].velocity = vec4(newVelocity, 0.0);
+    boids[boidId].world = createWorldMatrix(newPosition, newVelocity);
+}
