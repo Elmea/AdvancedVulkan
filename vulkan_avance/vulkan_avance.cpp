@@ -325,7 +325,7 @@ bool VulkanGraphicsApplication::Prepare()
 	std::array<VkDescriptorPoolSize, 4> poolSizes;
 	poolSizes[0] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, (MATRIXBUFFER_COUNT + 1) * rendercontext.PENDING_FRAMES };
 	poolSizes[1] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6 };
-	poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, (MATRIXBUFFER_COUNT + 2) * rendercontext.PENDING_FRAMES };
+	poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, (MATRIXBUFFER_COUNT + 4) * rendercontext.PENDING_FRAMES };
 	poolSizes[3] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * rendercontext.PENDING_FRAMES };
 
 	VkDescriptorPoolCreateInfo descriptorPoolInfo = {};
@@ -373,7 +373,7 @@ bool VulkanGraphicsApplication::Prepare()
 		DEBUG_CHECK_VK(vkCreateDescriptorSetLayout(context.device, &sceneSetInfo, nullptr, &scene.descriptorSetLayout[i]));
 	}
 
-	VkDescriptorSetLayoutBinding computeBindings[3];
+	VkDescriptorSetLayoutBinding computeBindings[5];
 	computeBindings[0].binding = 0;
 	computeBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	computeBindings[0].descriptorCount = 1;
@@ -387,14 +387,26 @@ bool VulkanGraphicsApplication::Prepare()
 	computeBindings[1].pImmutableSamplers = nullptr;
 
 	computeBindings[2].binding = 2;
-	computeBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	computeBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	computeBindings[2].descriptorCount = 1;
 	computeBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	computeBindings[2].pImmutableSamplers = nullptr;
 
+	computeBindings[3].binding = 3;
+	computeBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	computeBindings[3].descriptorCount = 1;
+	computeBindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeBindings[3].pImmutableSamplers = nullptr;
+
+	computeBindings[4].binding = 4;
+	computeBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	computeBindings[4].descriptorCount = 1;
+	computeBindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	computeBindings[4].pImmutableSamplers = nullptr;
+
 	VkDescriptorSetLayoutCreateInfo computeLayoutInfo = {};
 	computeLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-	computeLayoutInfo.bindingCount = 3;
+	computeLayoutInfo.bindingCount = 5;
 	computeLayoutInfo.pBindings = computeBindings;
 	DEBUG_CHECK_VK(vkCreateDescriptorSetLayout(context.device, &computeLayoutInfo, nullptr, &scene.computeDescriptorSetLayout));
 
@@ -763,17 +775,17 @@ bool VulkanGraphicsApplication::Prepare()
 		);
 	}
 
-	scene.simParams.separationDistance = 5.0f;
+	scene.simParams.separationDistance = 2.5f;
 	scene.simParams.alignmentDistance = 10.0f;
-	scene.simParams.cohesionDistance = 10.0f;
-	scene.simParams.separationWeight = 1.5f;
-	scene.simParams.alignmentWeight = 1.0f;
-	scene.simParams.cohesionWeight = 1.0f;
-	scene.simParams.maxSpeed = 15.0f;
-	scene.simParams.minSpeed = 5.0f;
+	scene.simParams.cohesionDistance = 5.0f;
+	scene.simParams.separationWeight = 20.0f;
+	scene.simParams.alignmentWeight = 5.0f;
+	scene.simParams.cohesionWeight = 2.0f;
+	scene.simParams.maxSpeed = 30.0f;
+	scene.simParams.minSpeed = 10.0f;
 	scene.simParams.boidCount = scene.instanceCount;
-	scene.simParams.boundaryMin = glm::vec3(-25.0f, -25.0f, -25.0f);
-	scene.simParams.boundaryMax = glm::vec3(25.0f, 25.0f, 25.0f);
+	scene.simParams.boundaryMin = glm::vec3(-25.0f);
+	scene.simParams.boundaryMax = glm::vec3(25.0f);
 
 	VkBufferCreateInfo ssboInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	ssboInfo.size = sizeof(InstanceData) * scene.instanceCount;
@@ -875,21 +887,31 @@ bool VulkanGraphicsApplication::Prepare()
 
 	for (uint32_t f = 0; f < rendercontext.PENDING_FRAMES; f++)
 	{
-		VkDescriptorBufferInfo computeBufferInfos[3];
+		VkDescriptorBufferInfo computeBufferInfos[5];
 
-		computeBufferInfos[0].buffer = scene.instanceSSBO[f].buffer;
+		uint32_t prev = (f + 1) % rendercontext.PENDING_FRAMES;
+
+		computeBufferInfos[0].buffer = scene.instanceSSBO[prev].buffer;
 		computeBufferInfos[0].offset = 0;
 		computeBufferInfos[0].range = VK_WHOLE_SIZE;
 
-		computeBufferInfos[1].buffer = scene.velocitySSBO[f].buffer;
+		computeBufferInfos[1].buffer = scene.velocitySSBO[prev].buffer;
 		computeBufferInfos[1].offset = 0;
 		computeBufferInfos[1].range = VK_WHOLE_SIZE;
 
-		computeBufferInfos[2].buffer = scene.simParamsUBO[f].buffer;
+		computeBufferInfos[2].buffer = scene.instanceSSBO[f].buffer;
 		computeBufferInfos[2].offset = 0;
 		computeBufferInfos[2].range = VK_WHOLE_SIZE;
 
-		VkWriteDescriptorSet computeWrites[3] = {};
+		computeBufferInfos[3].buffer = scene.velocitySSBO[f].buffer;
+		computeBufferInfos[3].offset = 0;
+		computeBufferInfos[3].range = VK_WHOLE_SIZE;
+
+		computeBufferInfos[4].buffer = scene.simParamsUBO[f].buffer;
+		computeBufferInfos[4].offset = 0;
+		computeBufferInfos[4].range = VK_WHOLE_SIZE;
+
+		VkWriteDescriptorSet computeWrites[5] = {};
 
 		computeWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		computeWrites[0].dstSet = scene.frameData[f].computeDescriptorSet;
@@ -909,10 +931,24 @@ bool VulkanGraphicsApplication::Prepare()
 		computeWrites[2].dstSet = scene.frameData[f].computeDescriptorSet;
 		computeWrites[2].dstBinding = 2;
 		computeWrites[2].descriptorCount = 1;
-		computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		computeWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		computeWrites[2].pBufferInfo = &computeBufferInfos[2];
 
-		vkUpdateDescriptorSets(context.device, 3, computeWrites, 0, nullptr);
+		computeWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		computeWrites[3].dstSet = scene.frameData[f].computeDescriptorSet;
+		computeWrites[3].dstBinding = 3;
+		computeWrites[3].descriptorCount = 1;
+		computeWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		computeWrites[3].pBufferInfo = &computeBufferInfos[3];
+
+		computeWrites[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		computeWrites[4].dstSet = scene.frameData[f].computeDescriptorSet;
+		computeWrites[4].dstBinding = 4;
+		computeWrites[4].descriptorCount = 1;
+		computeWrites[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		computeWrites[4].pBufferInfo = &computeBufferInfos[4];
+
+		vkUpdateDescriptorSets(context.device, 5, computeWrites, 0, nullptr);
 	}
 
 	return true;
@@ -1145,7 +1181,7 @@ bool VulkanGraphicsApplication::Update()
 bool VulkanGraphicsApplication::Display()
 {
 	uint32_t f = rendercontext.currentFrame;
-	
+
 	Buffer& paramUBO = scene.simParamsUBO[f];
 	VkMappedMemoryRange mappedRange = {};
 	mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -1178,24 +1214,21 @@ bool VulkanGraphicsApplication::Display()
 	uint32_t workgroupCount = (scene.instanceCount + 255) / 256;
 	vkCmdDispatch(commandBuffer, workgroupCount, 1, 1);
 
-	VkBufferMemoryBarrier bufferBarrier = {};
-	bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferBarrier.buffer = scene.instanceSSBO[f].buffer;
-	bufferBarrier.offset = 0;
-	bufferBarrier.size = VK_WHOLE_SIZE;
+	VkBufferMemoryBarrier barrier = {};
+	barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.buffer = scene.instanceSSBO[rendercontext.currentFrame].buffer;
+	barrier.offset = 0;
+	barrier.size = VK_WHOLE_SIZE;
 
 	vkCmdPipelineBarrier(
 		commandBuffer,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 		VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferBarrier,
-		0, nullptr
+		0, 0, nullptr, 1, &barrier, 0, nullptr
 	);
 #endif
 
@@ -1289,7 +1322,7 @@ int main(void)
 	VulkanGraphicsApplication app;
 
 	/* Create a windowed mode window and its OpenGL context */
-	app.window = glfwCreateWindow(1024, 768, APP_NAME, NULL, NULL);
+	app.window = glfwCreateWindow(1920, 1080, APP_NAME, NULL, NULL);
 	if (!app.window)
 	{
 		glfwTerminate();
