@@ -76,7 +76,7 @@ bool VulkanGraphicsApplication::Initialize(const char* appName)
 	DEBUG_CHECK_VK(volkInitialize());
 
 	// instance
-	uint32_t version;
+	uint32_t version = 0;
 	DEBUG_CHECK_VK(vkEnumerateInstanceVersion(&version));
 	uint32_t minorVersion = (version >> 12) & 0x3FF;
 
