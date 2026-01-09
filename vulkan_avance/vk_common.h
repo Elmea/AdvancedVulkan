@@ -9,7 +9,7 @@
 #ifdef _DEBUG
 #define DEBUG_CHECK_VK(x) if (VK_SUCCESS != (x)) { std::cout << (#x) << std::endl; __debugbreak(); }
 #else
-#define DEBUG_CHECK_VK(x) 
+#define DEBUG_CHECK_VK(x) x
 #endif
 
 //#define OPENGL_NDC

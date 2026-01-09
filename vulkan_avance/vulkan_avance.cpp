@@ -10,7 +10,7 @@
 
 #define APP_NAME "Vulkan_Avance"
 
-#define INSTANCE_COUNT 200
+#define INSTANCE_COUNT 300
 
 #define RUN_COMPUTE
 
